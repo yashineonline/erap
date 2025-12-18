@@ -1,0 +1,388 @@
+<script setup lang="ts">
+    import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+    import { useRouter } from "vue-router";
+    import ePub from "epubjs";
+    
+    import Modal from "../components/Modal.vue";
+    
+    import type { BookMeta, BookProfile } from "../lib/types";
+    import { loadBooks, saveBooks, loadBookFile, loadPrefs, savePrefs } from "../lib/storage";
+    import { DEFAULT_PREFS } from "../lib/storage";
+    import { extractInlineFootnotes, isNoterefAnchor, parseFnHref } from "../lib/glossary";
+    import { defineWordFallback } from "../lib/dictionary";
+    import { detectProfileFromMetadata } from "../lib/profiles";
+    import { buildQuoteText } from "../lib/quote";
+    import { ensureIndex, search as doSearch } from "../lib/search.ts";
+    import { startSession, endSession, totals } from "../lib/analytics";
+    import { safeText } from "../lib/epub";
+    
+    const props = defineProps<{ id: string }>();
+    const router = useRouter();
+    
+    const viewer = ref<HTMLDivElement|null>(null);
+    const chrome = ref(true);
+    
+    const bookMeta = ref<BookMeta|null>(null);
+    const profile = ref<BookProfile>("default");
+    
+    const prefs = ref(await loadPrefs(props.id).catch(() => DEFAULT_PREFS));
+    
+    const indexing = ref(false);
+    const q = ref("");
+    const results = ref<{ href: string; snippet: string }[]>([]);
+    let idx: any = null;
+    let hrefText: Record<string, string> = {};
+    
+    const modalOpen = ref(false);
+    const modalTitle = ref("");
+    const modalHtml = ref("");
+    const modalLoading = ref(false);
+    
+    let book: any = null;
+    let rendition: any = null;
+    let glossary: Record<string, any> = {};
+    let sessionId: string | null = null;
+    
+    const topPad = computed(() => (chrome.value && !prefs.value.studyMode) ? "pt-24" : "pt-0");
+    const botPad = computed(() => (chrome.value && !prefs.value.studyMode) ? "pb-32" : "pb-0");
+    
+    function openModal(title: string, html: string) {
+      modalTitle.value = title;
+      modalHtml.value = html;
+      modalOpen.value = true;
+    }
+    function closeModal() { modalOpen.value = false; }
+    
+    async function back() {
+      if (sessionId) await endSession(props.id, sessionId);
+      router.push("/");
+    }
+    
+    function applyTheme() {
+      if (!rendition) return;
+    
+      rendition.themes.register("user", {
+        body: {
+          background: prefs.value.bg,
+          color: prefs.value.fg,
+          "font-family": prefs.value.font,
+          "line-height": String(prefs.value.lineHeight),
+          margin: `${prefs.value.marginEm}em`,
+        },
+        a: { color: prefs.value.fg, "text-decoration": "underline" }
+      });
+      rendition.themes.select("user");
+      rendition.themes.fontSize(`${prefs.value.fontSizePct}%`);
+    }
+    
+    function toggleChrome() {
+      // don’t toggle when clicking controls
+      chrome.value = !chrome.value;
+    }
+    
+    async function updateMetaPatch(patch: Partial<Omit<BookMeta, "id" | "addedAt">>) {
+    // async function updateMetaPatch(patch: Partial<BookMeta>) {
+      const books = await loadBooks();
+      const i = books.findIndex(b => b.id === props.id);
+      if (i < 0) return;
+      const current = books[i];
+if (!current) return;
+books[i] = { ...current, ...patch };
+await saveBooks(books);
+bookMeta.value = books[i] ?? null;
+
+    //   books[i] = { ...books[i], ...patch };
+    //   await saveBooks(books);
+    //   bookMeta.value = books[i];
+    }
+    
+    async function initSearch() {
+      if (!book) return;
+      indexing.value = true;
+      try {
+        const res = await ensureIndex(props.id, book);
+        idx = res.idx;
+        hrefText = res.hrefText;
+      } finally {
+        indexing.value = false;
+      }
+    }
+    
+    watch(q, () => {
+      if (!idx) return;
+      results.value = q.value.trim() ? doSearch(idx, hrefText, q.value.trim()) : [];
+    });
+    
+    async function jump(href: string) {
+      closeModal();
+      chrome.value = true;
+      await rendition.display(href);
+    }
+    
+    async function showStats() {
+      const t = await totals(props.id);
+      const mins = Math.round(t.totalSeconds / 60);
+      openModal("Reading analytics", `<p>Total: <b>${mins}</b> minutes across <b>${t.totalSessions}</b> sessions.</p>`);
+    }
+    
+    async function handleNoterefClick(a: HTMLAnchorElement, currentDoc: Document) {
+      const href = a.getAttribute("href") || "";
+      const { file, fnKey } = parseFnHref(href);
+      if (!fnKey) return;
+    
+      modalLoading.value = true;
+      modalOpen.value = true;
+      modalTitle.value = "Loading…";
+      modalHtml.value = "";
+    
+      try {
+        const doc = file ? new DOMParser().parseFromString(String(await book.load(file)), "text/html") : currentDoc;
+        glossary = { ...glossary, ...extractInlineFootnotes(doc) };
+    
+        const entry = glossary[fnKey];
+        if (entry) {
+          modalTitle.value = entry.label ?? fnKey;
+          modalHtml.value = entry.html;
+          return;
+        }
+    
+        // fallback: dictionary for the key
+        const def = await defineWordFallback(fnKey);
+        modalTitle.value = fnKey;
+        modalHtml.value = def ? `<pre class="whitespace-pre-wrap">${escapeHtml(def)}</pre>` : `<p>No definition found.</p>`;
+      } finally {
+        modalLoading.value = false;
+      }
+    }
+    
+    function escapeHtml(s: string) {
+      return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] as string));
+    }
+    
+    async function handleSelection(cfiRange: string) {
+      // epub.js gives a CFI range; we can pull text via book.getRange
+      try {
+        const range = await book.getRange(cfiRange);
+        const selectedText = safeText(range?.toString());
+        if (!selectedText) return;
+    
+        const chapterLabel = await currentChapterLabel();
+        const quote = buildQuoteText({
+            profile:profile.value,
+          selectedText,
+          title: bookMeta.value?.title || "Untitled",
+          author: bookMeta.value?.author,
+          chapter: chapterLabel,
+        });
+    
+        // quick action modal
+        openModal("Selection", `
+          <p class="opacity-70">${escapeHtml(selectedText)}</p>
+          <div class="mt-3 flex flex-wrap gap-2">
+            <button id="btn-quote" class="btn btn-primary btn-sm">Copy quote</button>
+            <button id="btn-define" class="btn btn-outline btn-sm">Define first word</button>
+          </div>
+        `);
+    
+        setTimeout(() => {
+        //   const root = document.querySelector(".modal .card-body") as HTMLElement | null;
+          const bq = document.getElementById("btn-quote");
+          const bd = document.getElementById("btn-define");
+    
+          bq?.addEventListener("click", async () => {
+            await navigator.clipboard.writeText(quote);
+            openModal("Copied", `<p>Quote copied with citation.</p>`);
+          });
+    
+          bd?.addEventListener("click", async () => {
+            const first = selectedText.split(/\s+/)[0] || "";
+            const def = await defineWordFallback(first);
+            openModal(`Define: ${escapeHtml(first)}`, def ? `<pre class="whitespace-pre-wrap">${escapeHtml(def)}</pre>` : `<p>No definition found.</p>`);
+          });
+        }, 0);
+    
+      } catch {}
+    }
+    
+    async function currentChapterLabel(): Promise<string | undefined> {
+      try {
+        const href = rendition?.location?.start?.href;
+        const toc = book?.navigation?.toc ?? [];
+        const hit = toc.find((x: any) => x.href && href && x.href.split("#")[0] === href.split("#")[0]);
+        return hit?.label ?? undefined;
+      } catch {
+        return undefined;
+      }
+    }
+    
+    async function open() {
+      const books = await loadBooks();
+      const meta = books.find(b => b.id === props.id) || null;
+      bookMeta.value = meta;
+      if (!meta) { router.push("/"); return; }
+    
+      const blob = await loadBookFile(props.id);
+      if (!blob) { router.push("/"); return; }
+    
+      // Create epub.js Book
+      book = ePub(await blob.arrayBuffer());
+      await book.ready;
+    
+      // metadata
+      const md = await book.loaded.metadata;
+      const title = safeText(md?.title) || meta.title;
+      const author = safeText(md?.creator) || meta.author || "";
+    
+      // detect profile (Quran vs default) from sample
+      let sampleText = "";
+      try {
+        const firstHref = book.spine.items?.[0]?.href;
+        const raw = await book.load(firstHref);
+        const doc = new DOMParser().parseFromString(String(raw), "text/html");
+        sampleText = (doc.body?.textContent || "").slice(0, 6000);
+      } catch {}
+      profile.value = detectProfileFromMetadata(title, author, sampleText);
+    
+      await updateMetaPatch({ title, author, profile: profile.value });
+    
+      // Render
+      rendition = book.renderTo(viewer.value!, { width: "100%", height: "100%", spread: "none", flow: "paginated" });
+    
+      rendition.hooks.content.register((contents: any) => {
+        const doc = contents.document as Document;
+    
+        // hide inline footnotes block in page (we show them via popup)
+        try {
+          contents.addStylesheetRules({
+            "#inline-footnotes": { display: "none !important" },
+            ".sr-only": { display: "none !important" },
+          });
+        } catch {}
+    
+        // intercept noterefs
+        doc.addEventListener("click", async (ev: MouseEvent) => {
+          const target = ev.target as Element | null;
+          const a = target?.closest?.("a") as HTMLAnchorElement | null;
+          if (!a) return;
+    
+          if (isNoterefAnchor(a)) {
+            ev.preventDefault();
+            ev.stopPropagation();
+            await handleNoterefClick(a, doc);
+            return;
+          }
+        }, true);
+      });
+    
+      rendition.on("selected", (cfiRange: string) => handleSelection(cfiRange));
+    
+      rendition.on("relocated", async (loc: any) => {
+        const cfi = loc?.start?.cfi;
+        const href = loc?.start?.href;
+        const pct = loc?.start?.percentage;
+        await updateMetaPatch({ lastCfi: cfi, lastHref: href, lastProgress: pct });
+      });
+    
+      await rendition.display(meta.lastCfi || undefined);
+      applyTheme();
+    
+      // analytics session
+      const s = await startSession(props.id);
+      sessionId = s.id;
+    
+      // search index (first open might take a bit)
+      await initSearch();
+    }
+    
+    watch(prefs, async () => {
+      await savePrefs(props.id, prefs.value);
+      applyTheme();
+    }, { deep: true });
+    
+    onMounted(open);
+    
+    onBeforeUnmount(async () => {
+      if (sessionId) await endSession(props.id, sessionId);
+    });
+    </script>
+    
+    <template>
+      <div class="h-full bg-base-100">
+        <!-- Top chrome -->
+        <div v-if="chrome && !prefs.studyMode" class="fixed top-0 left-0 right-0 z-30 bg-base-200/95 backdrop-blur border-b border-base-300">
+          <div class="navbar">
+            <div class="flex-1 min-w-0">
+              <button class="btn btn-ghost btn-sm" @click="back">← Library</button>
+              <div class="ml-2 truncate font-semibold">{{ bookMeta?.title }}</div>
+            </div>
+            <div class="flex-none gap-2">
+              <button class="btn btn-sm btn-outline" @click="showStats">Stats</button>
+            </div>
+          </div>
+    
+          <div class="px-3 pb-3">
+            <input class="input input-bordered w-full" placeholder="Search in book…" v-model="q" />
+            <div v-if="indexing" class="text-xs opacity-60 mt-1">Indexing… first time can take a bit.</div>
+            <div v-if="results.length" class="mt-2 max-h-56 overflow-auto bg-base-100 rounded-xl border border-base-300">
+              <div v-for="r in results" :key="r.href" class="p-2 hover:bg-base-200 cursor-pointer" @click="jump(r.href)">
+                <div class="text-xs opacity-60">{{ r.href }}</div>
+                <div class="text-sm">{{ r.snippet }}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+    
+        <!-- Reader surface -->
+        <div :class="[topPad, botPad]" class="h-full" @click="toggleChrome">
+          <div ref="viewer" class="h-full w-full"></div>
+        </div>
+    
+        <!-- Bottom chrome -->
+        <div v-if="chrome && !prefs.studyMode" class="fixed bottom-0 left-0 right-0 z-30 bg-base-200/95 backdrop-blur border-t border-base-300" @click.stop>
+          <div class="p-3 grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <label class="form-control">
+              <div class="label"><span class="label-text">Font size</span></div>
+              <input type="range" min="80" max="180" step="5" v-model.number="prefs.fontSizePct" class="range range-sm" />
+            </label>
+    
+            <label class="form-control">
+              <div class="label"><span class="label-text">Line height</span></div>
+              <input type="range" min="1.2" max="2.2" step="0.05" v-model.number="prefs.lineHeight" class="range range-sm" />
+            </label>
+    
+            <label class="form-control">
+              <div class="label"><span class="label-text">Background</span></div>
+              <input type="color" v-model="prefs.bg" class="input input-bordered h-10 p-1" />
+            </label>
+    
+            <label class="form-control">
+              <div class="label"><span class="label-text">Text</span></div>
+              <input type="color" v-model="prefs.fg" class="input input-bordered h-10 p-1" />
+            </label>
+    
+            <label class="form-control col-span-2">
+              <div class="label"><span class="label-text">Font</span></div>
+              <select class="select select-bordered" v-model="prefs.font">
+                <option :value='`ui-serif, Georgia, "Times New Roman", Times, serif`'>Serif</option>
+                <option :value='`ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif`'>Sans</option>
+                <option :value='`ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace`'>Mono</option>
+              </select>
+            </label>
+    
+            <label class="form-control col-span-2">
+              <div class="label"><span class="label-text">Study mode</span></div>
+              <label class="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" class="toggle" v-model="prefs.studyMode" />
+                <span class="text-sm opacity-70">Hide UI (tap screen to show/hide)</span>
+              </label>
+            </label>
+          </div>
+        </div>
+    
+        <Modal :open="modalOpen" :title="modalTitle" @close="closeModal">
+          <div v-if="modalLoading" class="opacity-70">Loading…</div>
+          <div v-else v-html="modalHtml"></div>
+        </Modal>
+      </div>
+    </template>
+    
