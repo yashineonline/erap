@@ -25,7 +25,9 @@
     const bookMeta = ref<BookMeta|null>(null);
     const profile = ref<BookProfile>("default");
     
-    const prefs = ref(await loadPrefs(props.id).catch(() => DEFAULT_PREFS));
+      const prefs = ref(DEFAULT_PREFS);
+  
+    // const prefs = ref(await loadPrefs(props.id).catch(() => DEFAULT_PREFS));
     
     const indexing = ref(false);
     const q = ref("");
@@ -79,6 +81,26 @@
       // don’t toggle when clicking controls
       chrome.value = !chrome.value;
     }
+
+    function normalizePath(p: string) {
+  const parts: string[] = [];
+  for (const seg of p.split("/")) {
+    if (!seg || seg === ".") continue;
+    if (seg === "..") parts.pop();
+    else parts.push(seg);
+  }
+  return parts.join("/");
+}
+
+function resolveSpineHref(baseHref: string | undefined, targetFile: string) {
+  const t = targetFile.replace(/^\/+/, ""); // remove leading slashes
+  if (!baseHref) return t;
+
+  const base = baseHref.replace(/^\/+/, "");
+  const dir = base.includes("/") ? base.slice(0, base.lastIndexOf("/") + 1) : "";
+  return normalizePath(dir + t);
+}
+
     
     async function updateMetaPatch(patch: Partial<Omit<BookMeta, "id" | "addedAt">>) {
     // async function updateMetaPatch(patch: Partial<BookMeta>) {
@@ -124,36 +146,166 @@ bookMeta.value = books[i] ?? null;
       const mins = Math.round(t.totalSeconds / 60);
       openModal("Reading analytics", `<p>Total: <b>${mins}</b> minutes across <b>${t.totalSessions}</b> sessions.</p>`);
     }
-    
-    async function handleNoterefClick(a: HTMLAnchorElement, currentDoc: Document) {
-      const href = a.getAttribute("href") || "";
-      const { file, fnKey } = parseFnHref(href);
-      if (!fnKey) return;
-    
-      modalLoading.value = true;
-      modalOpen.value = true;
-      modalTitle.value = "Loading…";
-      modalHtml.value = "";
-    
-      try {
-        const doc = file ? new DOMParser().parseFromString(String(await book.load(file)), "text/html") : currentDoc;
-        glossary = { ...glossary, ...extractInlineFootnotes(doc) };
-    
-        const entry = glossary[fnKey];
-        if (entry) {
-          modalTitle.value = entry.label ?? fnKey;
-          modalHtml.value = entry.html;
-          return;
-        }
-    
-        // fallback: dictionary for the key
-        const def = await defineWordFallback(fnKey);
-        modalTitle.value = fnKey;
-        modalHtml.value = def ? `<pre class="whitespace-pre-wrap">${escapeHtml(def)}</pre>` : `<p>No definition found.</p>`;
-      } finally {
-        modalLoading.value = false;
+
+    function normalizeTerm(s: string) {
+  return (s || "")
+    .toLowerCase()
+    .replace(/[’‘`]/g, "'")
+    .replace(/^[']+/, "")                // drop leading apostrophes
+    .replace(/[^a-z0-9\s'-]+/g, " ")     // keep simple chars
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractDlGlossary(doc: Document) {
+  // Map normalized term -> { label, html }
+  const out: Record<string, { label: string; html: string }> = {};
+  const dls = Array.from(doc.querySelectorAll("dl"));
+
+  for (const dl of dls) {
+    const kids = Array.from(dl.children) as HTMLElement[];
+    for (let i = 0; i < kids.length; i++) {
+      const el = kids[i];
+      if (!el || el.tagName.toLowerCase() !== "dt") continue;
+
+      const dd = kids[i + 1];
+      if (!dd || dd.tagName.toLowerCase() !== "dd") continue;
+
+      const rawLabel = (el.textContent || "").trim();
+      const defHtml = (dd.innerHTML || "").trim();
+      if (!rawLabel || !defHtml) continue;
+
+      // dt can contain multiple names: "'abd, 'abid"
+      const names = rawLabel.split(/[;,]/).map(x => x.trim()).filter(Boolean);
+      for (const name of names) {
+        const key = normalizeTerm(name);
+        if (key) out[key] = { label: name, html: defHtml };
       }
     }
+  }
+  return out;
+}
+
+async function handleNoterefClick(a: HTMLAnchorElement, currentDoc: Document) {
+  const href = a.getAttribute("href") || "";
+  const { file, fnKey } = parseFnHref(href);
+  if (!fnKey) return;
+
+  modalLoading.value = true;
+  modalOpen.value = true;
+  modalTitle.value = "Loading…";
+  modalHtml.value = "";
+
+  try {
+    // Always ingest from current loaded chapter first (in case it contains inline notes)
+    glossary = { ...glossary, ...extractInlineFootnotes(currentDoc) };
+
+    // 1) try direct key matches from extracted notes
+    let entry = glossary[fnKey] || glossary[`fn-${fnKey}`];
+    if (entry) {
+      modalTitle.value = entry.label ?? fnKey;
+      modalHtml.value = `<div class="space-y-2 leading-relaxed">${entry.html}</div>`;
+      return;
+    }
+
+    // 2) load referenced file (folder-aware) and parse it
+    if (file) {
+      const baseHref = rendition?.location?.start?.href || bookMeta.value?.lastHref || "";
+      const resolved = resolveSpineHref(baseHref, file);
+
+      const raw = await Promise.race([
+        book.load(resolved),
+        new Promise((_, rej) => setTimeout(() => rej(new Error("book.load timeout")), 2000)),
+      ]);
+
+      const doc2 = new DOMParser().parseFromString(String(raw), "text/html");
+
+      // 2a) inline footnotes / id-based notes in that file
+      glossary = { ...glossary, ...extractInlineFootnotes(doc2) };
+      entry = glossary[fnKey] || glossary[`fn-${fnKey}`];
+      if (entry) {
+        modalTitle.value = entry.label ?? fnKey;
+        modalHtml.value = `<div class="space-y-2 leading-relaxed">${entry.html}</div>`;
+        return;
+      }
+
+      // 2b) DL glossary lookup by term (your ch006.xhtml structure)
+      const dlMap = extractDlGlossary(doc2);
+      const key = normalizeTerm(fnKey);
+      const hit = dlMap[key];
+      if (hit) {
+        modalTitle.value = hit.label || fnKey;
+        modalHtml.value = `<div class="space-y-2 leading-relaxed">${hit.html}</div>`;
+        return;
+      }
+
+      // Sometimes link text is better than fnKey (e.g. fnKey is short/normalized)
+      const linkTextKey = normalizeTerm(a.textContent || "");
+      const hit2 = dlMap[linkTextKey];
+      if (hit2) {
+        modalTitle.value = hit2.label || (a.textContent || fnKey);
+        modalHtml.value = `<div class="space-y-2 leading-relaxed">${hit2.html}</div>`;
+        return;
+      }
+    }
+
+    // 3) fallback: dictionary
+    const def = await defineWordFallback(fnKey);
+    modalTitle.value = fnKey;
+    modalHtml.value = def
+      ? `<pre class="whitespace-pre-wrap">${escapeHtml(def)}</pre>`
+      : `<p>No definition found.</p>`;
+  } finally {
+    modalLoading.value = false;
+  }
+}
+
+    
+//     async function handleNoterefClick(a: HTMLAnchorElement, currentDoc: Document) {
+//       const href = a.getAttribute("href") || "";
+//       const { file, fnKey } = parseFnHref(href);
+//       if (!fnKey) return;
+    
+//       modalLoading.value = true;
+//       modalOpen.value = true;
+//       modalTitle.value = "Loading…";
+//       modalHtml.value = "";
+    
+//       try {
+
+// // 1) Always parse from the current loaded chapter first (fast + reliable)
+// glossary = { ...glossary, ...extractInlineFootnotes(currentDoc) };
+// let entry = glossary[fnKey];
+
+// // 2) If not found, only then try to load the referenced file (with a timeout)
+// if (!entry && file) {
+// const baseHref = rendition?.location?.start?.href || bookMeta.value?.lastHref || "";
+// const resolved = resolveSpineHref(baseHref, file);
+
+//   const raw = await Promise.race([
+//     book.load(resolved),
+//     new Promise((_, rej) => setTimeout(() => rej(new Error("book.load timeout")), 1500)),
+//   ]);
+//   const doc2 = new DOMParser().parseFromString(String(raw), "text/html");
+//   glossary = { ...glossary, ...extractInlineFootnotes(doc2) };
+//   entry = glossary[fnKey];
+// }
+
+// if (entry) {
+//   modalTitle.value = entry.label ?? fnKey;
+//   modalHtml.value = `<div class="space-y-2 leading-relaxed">${entry.html}</div>`;
+
+//   return;
+// }
+    
+    //     // fallback: dictionary for the key
+    //     const def = await defineWordFallback(fnKey);
+    //     modalTitle.value = fnKey;
+    //     modalHtml.value = def ? `<pre class="whitespace-pre-wrap">${escapeHtml(def)}</pre>` : `<p>No definition found.</p>`;
+    //   } finally {
+    //     modalLoading.value = false;
+    //   }
+    // }
     
     function escapeHtml(s: string) {
       return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c] as string));
@@ -227,6 +379,11 @@ bookMeta.value = books[i] ?? null;
       // Create epub.js Book
       book = ePub(await blob.arrayBuffer());
       await book.ready;
+
+      book.spine.hooks.serialize.register((output: string) => {
+  return output.replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, "");
+});
+
     
       // metadata
       const md = await book.loaded.metadata;
@@ -244,12 +401,17 @@ bookMeta.value = books[i] ?? null;
       profile.value = detectProfileFromMetadata(title, author, sampleText);
     
       await updateMetaPatch({ title, author, profile: profile.value });
+
+
     
       // Render
-      rendition = book.renderTo(viewer.value!, { width: "100%", height: "100%", spread: "none", flow: "paginated" });
+      rendition = book.renderTo(viewer.value!, { width: "100%", height: "100%", spread: "none",  manager: "continuous",
+      flow: "scrolled-doc" });
     
       rendition.hooks.content.register((contents: any) => {
         const doc = contents.document as Document;
+        doc.querySelectorAll("script").forEach(s => s.remove());
+
     
         // hide inline footnotes block in page (we show them via popup)
         try {
@@ -299,7 +461,11 @@ bookMeta.value = books[i] ?? null;
       applyTheme();
     }, { deep: true });
     
-    onMounted(open);
+    onMounted(async () => {
+  prefs.value = await loadPrefs(props.id).catch(() => DEFAULT_PREFS);
+  await open();
+});
+
     
     onBeforeUnmount(async () => {
       if (sessionId) await endSession(props.id, sessionId);

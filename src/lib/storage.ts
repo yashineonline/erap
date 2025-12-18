@@ -33,8 +33,12 @@ export async function setOnboarded() {
 export async function loadBooks(): Promise<BookMeta[]> {
   return (await get(K.books)) ?? [];
 }
+
 export async function saveBooks(books: BookMeta[]) {
-  await set(K.books, books);
+  // IMPORTANT: Vue refs/arrays can be reactive Proxies; IndexedDB can't clone Proxies.
+  // Convert to a plain array of plain objects before saving.
+  const plain = books.map(b => ({ ...b }));
+  await set(K.books, plain);
 }
 
 export async function saveBookFile(id: string, blob: Blob) {
@@ -56,9 +60,16 @@ export async function deleteBook(id: string) {
 export async function loadPrefs(bookId: string): Promise<ReaderPrefs> {
   return (await get(K.prefs(bookId))) ?? DEFAULT_PREFS;
 }
+
 export async function savePrefs(bookId: string, prefs: ReaderPrefs) {
-  await set(K.prefs(bookId), prefs);
+  // de-proxy: prefs is a reactive object in Vue
+  const plain = { ...prefs };
+  await set(K.prefs(bookId), plain);
 }
+
+// export async function savePrefs(bookId: string, prefs: ReaderPrefs) {
+//   await set(K.prefs(bookId), prefs);
+// }
 
 export async function loadSessions(bookId: string): Promise<ReadingSession[]> {
   return (await get(K.sessions(bookId))) ?? [];
