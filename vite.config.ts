@@ -4,6 +4,7 @@ import tailwindcss from "@tailwindcss/vite";
 import { VitePWA } from "vite-plugin-pwa";
 
 export default defineConfig({
+  base: "/erap/",
   plugins: [
     vue(),
     tailwindcss(),
@@ -12,7 +13,8 @@ export default defineConfig({
       manifest: {
         name: "Ebook Reader",
         short_name: "EReader",
-        start_url: "/",
+        start_url: "/erap/",
+        scope: "/erap/",
         display: "standalone",
         background_color: "#ffffff",
         theme_color: "#111827",

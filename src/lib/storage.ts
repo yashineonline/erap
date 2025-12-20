@@ -18,6 +18,7 @@ export const DEFAULT_PREFS: ReaderPrefs = {
   lineHeight: 1.55,
   marginEm: 1.2,
   studyMode: false,
+  textAlign: "justify",
 };
 
 export async function isOnboarded(): Promise<boolean> {

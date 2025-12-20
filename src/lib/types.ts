@@ -36,3 +36,6 @@ export type GlossaryEntry = {
   html: string;   // inner HTML of definition
   text: string;   // plain text
 };
+
+textAlign: "left" | "justify" | "center" | "right";
+

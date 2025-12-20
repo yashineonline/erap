@@ -8,7 +8,7 @@
     import type { BookMeta, BookProfile } from "../lib/types";
     import { loadBooks, saveBooks, loadBookFile, loadPrefs, savePrefs } from "../lib/storage";
     import { DEFAULT_PREFS } from "../lib/storage";
-    import { extractInlineFootnotes, isNoterefAnchor, parseFnHref } from "../lib/glossary";
+    import { extractInlineFootnotes, isNoterefAnchor } from "../lib/glossary";
     import { defineWordFallback } from "../lib/dictionary";
     import { detectProfileFromMetadata } from "../lib/profiles";
     import { buildQuoteText } from "../lib/quote";
@@ -70,8 +70,10 @@
           "font-family": prefs.value.font,
           "line-height": String(prefs.value.lineHeight),
           margin: `${prefs.value.marginEm}em`,
+          "text-align": `${prefs.value.textAlign} !important`,
         },
-        a: { color: prefs.value.fg, "text-decoration": "underline" }
+        a: { color: prefs.value.fg, "text-decoration": "underline" },
+        p: { "text-align": `${prefs.value.textAlign} !important` },
       });
       rendition.themes.select("user");
       rendition.themes.fontSize(`${prefs.value.fontSizePct}%`);
@@ -187,9 +189,10 @@ function extractDlGlossary(doc: Document) {
 }
 
 async function handleNoterefClick(a: HTMLAnchorElement, currentDoc: Document) {
-  const href = a.getAttribute("href") || "";
-  const { file, fnKey } = parseFnHref(href);
-  if (!fnKey) return;
+  const href0 = a.getAttribute("href") || "";
+  const [filePartRaw, fragRaw] = href0.split("#");
+  const frag = fragRaw ? decodeURIComponent(fragRaw).trim() : "";
+  if (!frag) return;
 
   modalLoading.value = true;
   modalOpen.value = true;
@@ -197,61 +200,59 @@ async function handleNoterefClick(a: HTMLAnchorElement, currentDoc: Document) {
   modalHtml.value = "";
 
   try {
-    // Always ingest from current loaded chapter first (in case it contains inline notes)
-    glossary = { ...glossary, ...extractInlineFootnotes(currentDoc) };
+    // Decide which document to search
+    let doc = currentDoc;
 
-    // 1) try direct key matches from extracted notes
-    let entry = glossary[fnKey] || glossary[`fn-${fnKey}`];
-    if (entry) {
-      modalTitle.value = entry.label ?? fnKey;
-      modalHtml.value = `<div class="space-y-2 leading-relaxed">${entry.html}</div>`;
-      return;
-    }
+    // If link points to another file, load it (folder-aware)
+    const filePart = (filePartRaw || "").trim();
+    if (filePart) {
+      const baseHref =
+        rendition?.location?.start?.href ||
+        bookMeta.value?.lastHref ||
+        "";
 
-    // 2) load referenced file (folder-aware) and parse it
-    if (file) {
-      const baseHref = rendition?.location?.start?.href || bookMeta.value?.lastHref || "";
-      const resolved = resolveSpineHref(baseHref, file);
+      const resolved = resolveSpineHref(baseHref, filePart);
 
       const raw = await Promise.race([
         book.load(resolved),
         new Promise((_, rej) => setTimeout(() => rej(new Error("book.load timeout")), 2000)),
       ]);
 
-      const doc2 = new DOMParser().parseFromString(String(raw), "text/html");
-
-      // 2a) inline footnotes / id-based notes in that file
-      glossary = { ...glossary, ...extractInlineFootnotes(doc2) };
-      entry = glossary[fnKey] || glossary[`fn-${fnKey}`];
-      if (entry) {
-        modalTitle.value = entry.label ?? fnKey;
-        modalHtml.value = `<div class="space-y-2 leading-relaxed">${entry.html}</div>`;
-        return;
-      }
-
-      // 2b) DL glossary lookup by term (your ch006.xhtml structure)
-      const dlMap = extractDlGlossary(doc2);
-      const key = normalizeTerm(fnKey);
-      const hit = dlMap[key];
-      if (hit) {
-        modalTitle.value = hit.label || fnKey;
-        modalHtml.value = `<div class="space-y-2 leading-relaxed">${hit.html}</div>`;
-        return;
-      }
-
-      // Sometimes link text is better than fnKey (e.g. fnKey is short/normalized)
-      const linkTextKey = normalizeTerm(a.textContent || "");
-      const hit2 = dlMap[linkTextKey];
-      if (hit2) {
-        modalTitle.value = hit2.label || (a.textContent || fnKey);
-        modalHtml.value = `<div class="space-y-2 leading-relaxed">${hit2.html}</div>`;
-        return;
-      }
+      doc = new DOMParser().parseFromString(String(raw), "text/html");
     }
 
-    // 3) fallback: dictionary
-    const def = await defineWordFallback(fnKey);
-    modalTitle.value = fnKey;
+    // 1) Calibre-style: target by fragment id (#fn-nafs)
+    const target = doc.getElementById(frag) as HTMLElement | null;
+    if (target) {
+      const clone = target.cloneNode(true) as HTMLElement;
+      // remove screen-reader-only label blocks (we use them as title)
+      const srStrong = clone.querySelector(".sr-only strong")?.textContent?.trim();
+      clone.querySelectorAll(".sr-only").forEach(n => n.remove());
+
+      const fallbackTitle =
+        (a.textContent || "").trim() ||
+        frag.replace(/^fn-/, "").replace(/^note-/, "");
+
+      modalTitle.value = srStrong || fallbackTitle || frag;
+      modalHtml.value = `<div class="space-y-2 leading-relaxed">${clone.innerHTML}</div>`;
+      return;
+    }
+
+    // 2) fallback: try your extractor map (optional)
+    glossary = { ...glossary, ...extractInlineFootnotes(doc) };
+    const key1 = frag;
+    const key2 = frag.replace(/^fn-/, "");
+    const entry = glossary[key1] || glossary[key2] || glossary[`fn-${key2}`];
+    if (entry) {
+      modalTitle.value = entry.label ?? key2;
+      modalHtml.value = `<div class="space-y-2 leading-relaxed">${entry.html}</div>`;
+      return;
+    }
+
+    // 3) final fallback: dictionary
+    const dictKey = frag.replace(/^fn-/, "").replace(/^note-/, "");
+    const def = await defineWordFallback(dictKey);
+    modalTitle.value = dictKey;
     modalHtml.value = def
       ? `<pre class="whitespace-pre-wrap">${escapeHtml(def)}</pre>`
       : `<p>No definition found.</p>`;
@@ -259,6 +260,81 @@ async function handleNoterefClick(a: HTMLAnchorElement, currentDoc: Document) {
     modalLoading.value = false;
   }
 }
+
+
+// async function handleNoterefClick(a: HTMLAnchorElement, currentDoc: Document) {
+//   const href = a.getAttribute("href") || "";
+//   const { file, fnKey } = parseFnHref(href);
+//   if (!fnKey) return;
+
+//   modalLoading.value = true;
+//   modalOpen.value = true;
+//   modalTitle.value = "Loading…";
+//   modalHtml.value = "";
+
+//   try {
+//     // Always ingest from current loaded chapter first (in case it contains inline notes)
+//     glossary = { ...glossary, ...extractInlineFootnotes(currentDoc) };
+
+//     // 1) try direct key matches from extracted notes
+//     let entry = glossary[fnKey] || glossary[`fn-${fnKey}`];
+//     if (entry) {
+//       modalTitle.value = entry.label ?? fnKey;
+//       modalHtml.value = `<div class="space-y-2 leading-relaxed">${entry.html}</div>`;
+//       return;
+//     }
+
+//     // 2) load referenced file (folder-aware) and parse it
+//     if (file) {
+//       const baseHref = rendition?.location?.start?.href || bookMeta.value?.lastHref || "";
+//       const resolved = resolveSpineHref(baseHref, file);
+
+//       const raw = await Promise.race([
+//         book.load(resolved),
+//         new Promise((_, rej) => setTimeout(() => rej(new Error("book.load timeout")), 2000)),
+//       ]);
+
+//       const doc2 = new DOMParser().parseFromString(String(raw), "text/html");
+
+//       // 2a) inline footnotes / id-based notes in that file
+//       glossary = { ...glossary, ...extractInlineFootnotes(doc2) };
+//       entry = glossary[fnKey] || glossary[`fn-${fnKey}`];
+//       if (entry) {
+//         modalTitle.value = entry.label ?? fnKey;
+//         modalHtml.value = `<div class="space-y-2 leading-relaxed">${entry.html}</div>`;
+//         return;
+//       }
+
+//       // 2b) DL glossary lookup by term (your ch006.xhtml structure)
+//       const dlMap = extractDlGlossary(doc2);
+//       const key = normalizeTerm(fnKey);
+//       const hit = dlMap[key];
+//       if (hit) {
+//         modalTitle.value = hit.label || fnKey;
+//         modalHtml.value = `<div class="space-y-2 leading-relaxed">${hit.html}</div>`;
+//         return;
+//       }
+
+//       // Sometimes link text is better than fnKey (e.g. fnKey is short/normalized)
+//       const linkTextKey = normalizeTerm(a.textContent || "");
+//       const hit2 = dlMap[linkTextKey];
+//       if (hit2) {
+//         modalTitle.value = hit2.label || (a.textContent || fnKey);
+//         modalHtml.value = `<div class="space-y-2 leading-relaxed">${hit2.html}</div>`;
+//         return;
+//       }
+//     }
+
+//     // 3) fallback: dictionary
+//     const def = await defineWordFallback(fnKey);
+//     modalTitle.value = fnKey;
+//     modalHtml.value = def
+//       ? `<pre class="whitespace-pre-wrap">${escapeHtml(def)}</pre>`
+//       : `<p>No definition found.</p>`;
+//   } finally {
+//     modalLoading.value = false;
+//   }
+// }
 
     
 //     async function handleNoterefClick(a: HTMLAnchorElement, currentDoc: Document) {
@@ -535,6 +611,17 @@ async function handleNoterefClick(a: HTMLAnchorElement, currentDoc: Document) {
               </select>
             </label>
     
+            <label class="form-control col-span-2">
+  <div class="label"><span class="label-text">Alignment</span></div>
+  <select class="select select-bordered" v-model="prefs.textAlign">
+    <option value="left">Left</option>
+    <option value="justify">Justify</option>
+    <option value="center">Center</option>
+    <option value="right">Right</option>
+  </select>
+</label>
+
+
             <label class="form-control col-span-2">
               <div class="label"><span class="label-text">Study mode</span></div>
               <label class="flex items-center gap-2 cursor-pointer">
