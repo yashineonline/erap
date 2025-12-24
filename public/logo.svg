@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" 
+viewBox="0 0 450 449" 
+class="logo" 
+style="color:#0A7F3F"
+role="img" 
+aria-label="The twelve-pointed star logo is a trademark of Ansari Publications. No use of the logo or similar design may be used without prior permission.">
+  <title>Ansari Publications logo</title>
+<desc>The Ansari Publications logo consists of a twelve-pointed star formed by four overlapping equilateral triangles, enclosed by a circle.</desc>
+<g fill="none"
+     stroke="currentColor">
+    <path style="fill:none;stroke-width:17;stroke-linecap:square;stroke-linejoin:miter; stroke:currentColor;stroke-opacity:1;stroke-miterlimit:3.25;" d="M 523.019531 230.140625 C 523.019531 172.980469 500.3125 118.164063 459.894531 77.746094 C 419.476563 37.328125 364.660156 14.621094 307.5 14.621094 C 250.339844 14.621094 195.523438 37.328125 155.105469 77.746094 C 114.6875 118.164063 91.980469 172.980469 91.980469 230.140625 C 91.980469 287.300781 114.6875 342.117188 155.105469 382.535156 C 195.523438 422.953125 250.339844 445.660156 307.5 445.660156 C 364.660156 445.660156 419.476563 422.953125 459.894531 382.535156 C 500.3125 342.117188 523.019531 287.300781 523.019531 230.140625 Z M 523.019531 230.140625 " transform="matrix(1,0,0,1,-83,-6)"/>
+    <path style="fill:none;stroke-width:22.45;stroke-linecap:square;stroke-linejoin:miter; stroke:currentColor;stroke-opacity:1;stroke-miterlimit:3.25;" d="M 307.5 42.730469 L 469.800781 323.84375 L 145.199219 323.84375 Z M 307.5 42.730469 " transform="matrix(1,0,0,1,-83,-6)"/>
+    <path style="fill:none;stroke-width:22.45;stroke-linecap:square;stroke-linejoin:miter; stroke:currentColor;stroke-opacity:1;stroke-miterlimit:3.25;" d="M 401.203125 67.839844 L 401.203125 392.441406 L 120.089844 230.140625 Z M 401.203125 67.839844 " transform="matrix(1,0,0,1,-83,-6)"/>
+    <path style="fill:none;stroke-width:22.45;stroke-linecap:square;stroke-linejoin:miter; stroke:currentColor;stroke-opacity:1;stroke-miterlimit:3.25;" d="M 469.800781 136.4375 L 307.5 417.550781 L 145.199219 136.4375 Z M 469.800781 136.4375 " transform="matrix(1,0,0,1,-83,-6)"/>
+    <path style="fill:none;stroke-width:22.45;stroke-linecap:square;stroke-linejoin:miter; stroke:currentColor;stroke-opacity:1;stroke-miterlimit:3.25;" d="M 494.910156 230.140625 L 213.796875 392.441406 L 213.796875 67.839844 Z M 494.910156 230.140625 " transform="matrix(1,0,0,1,-83,-6)"/>
+  </g>
+</svg>

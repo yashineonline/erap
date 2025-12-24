@@ -86,10 +86,30 @@ export function extractInlineFootnotes(doc: Document): Record<string, GlossaryEn
 
 
 export function isNoterefAnchor(a: HTMLAnchorElement) {
-  const cls = a.classList.contains("noteref");
+  // Common EPUB3 patterns:
+  //   <a epub:type="noteref" role="doc-noteref" rel="footnote" class="noteref" href="...#...">
+  // Older / non-standard patterns sometimes only set rel="footnote".
+  const cls =
+    a.classList.contains("noteref") ||
+    a.classList.contains("footnote-ref") ||
+    a.classList.contains("footnoteRef") ||
+    a.classList.contains("endnote") ||
+    a.classList.contains("endnote-ref");
+
   const role = a.getAttribute("role") === "doc-noteref";
-  const et = (a.getAttribute("epub:type") || "").split(/\s+/).includes("noteref");
-  return cls || role || et;
+
+  const epubType = (a.getAttribute("epub:type") || "").split(/\s+/);
+  const et = epubType.includes("noteref");
+
+  const rel = (a.getAttribute("rel") || "").split(/\s+/);
+  const relFootnote = rel.includes("footnote");
+
+  const href = a.getAttribute("href") || "";
+  const hasFrag = href.includes("#");
+  const looksLikeFootnoteTarget =
+    hasFrag && /#(fn[-_]?|footnote|note|endnote)/i.test(href);
+
+  return cls || role || et || relFootnote || looksLikeFootnoteTarget;
 }
 
 export function parseFnHref(href: string): { file: string | null; fnKey: string | null } {

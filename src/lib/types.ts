@@ -12,6 +12,8 @@ export type BookMeta = {
   profile?: BookProfile;
 };
 
+export type TextAlign = "left" | "justify" | "center" | "right";
+
 export type ReaderPrefs = {
   bg: string;
   fg: string;
@@ -20,6 +22,9 @@ export type ReaderPrefs = {
   lineHeight: number;   // 1.2..2.2
   marginEm: number;     // 0.4..2.4
   studyMode: boolean;
+  textAlign: TextAlign;
+  noterefColor: string;
+  noterefUnderline: boolean;
 };
 
 export type ReadingSession = {
@@ -37,5 +42,5 @@ export type GlossaryEntry = {
   text: string;   // plain text
 };
 
-textAlign: "left" | "justify" | "center" | "right";
+
 

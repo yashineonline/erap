@@ -5,6 +5,10 @@ import { VitePWA } from "vite-plugin-pwa";
 
 export default defineConfig({
   base: "/erap/",
+  build: {
+    outDir: "docs",
+    emptyOutDir: true,
+  },
   plugins: [
     vue(),
     tailwindcss(),

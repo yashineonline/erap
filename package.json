@@ -1,10 +1,11 @@
 {
   "name": "glossary-reader",
   "private": true,
-  "version": "0.0.0",
   "type": "module",
+  "appVersion": "0.01",
   "scripts": {
     "dev": "vite",
+    "prebuild": "node scripts/bump-build.mjs",
     "build": "vue-tsc -b && vite build",
     "preview": "vite preview"
   },

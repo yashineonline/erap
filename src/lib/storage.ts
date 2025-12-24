@@ -1,6 +1,7 @@
 import { get, set, del } from "idb-keyval";
 import type { BookMeta, ReaderPrefs, ReadingSession } from "./types";
 
+
 const K = {
   meta: "meta:v1",
   books: "books:v1",                  // BookMeta[]
@@ -19,6 +20,8 @@ export const DEFAULT_PREFS: ReaderPrefs = {
   marginEm: 1.2,
   studyMode: false,
   textAlign: "justify",
+  noterefColor: "#2563eb",
+  noterefUnderline: true,
 };
 
 export async function isOnboarded(): Promise<boolean> {
@@ -59,7 +62,8 @@ export async function deleteBook(id: string) {
 }
 
 export async function loadPrefs(bookId: string): Promise<ReaderPrefs> {
-  return (await get(K.prefs(bookId))) ?? DEFAULT_PREFS;
+  const p = (await get(K.prefs(bookId))) as Partial<ReaderPrefs> | undefined;
+  return { ...DEFAULT_PREFS, ...(p ?? {}) };
 }
 
 export async function savePrefs(bookId: string, prefs: ReaderPrefs) {

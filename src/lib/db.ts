@@ -1,4 +1,5 @@
 import { openDB } from "idb";
+import type { TextAlign } from "./types";
 
 export type StoredBook = {
   id: string;
@@ -15,9 +16,13 @@ export type ReaderPrefs = {
   bg: string;
   fg: string;
   font: string;
+  fontSizePct: number;
   fontSize: number;     // percent
   lineHeight: number;   // em
+  textAlign: TextAlign;
+  marginEm: number;
   studyMode: boolean;
+  noterefColor: string
 };
 
 export type ReadingSession = {

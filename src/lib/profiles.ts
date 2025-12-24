@@ -1,20 +1,8 @@
 export type BookProfile = "default" | "quran";
 
-export function detectProfileFromMetadata(metaTitle: string, metaAuthor: string, sampleText: string): BookProfile {
-  const t = (metaTitle || "").toLowerCase();
-  const a = (metaAuthor || "").toLowerCase();
-  const s = (sampleText || "").toLowerCase();
-
-  // Heuristics: you can tighten later
-  const looksQuran =
-    t.includes("quran") ||
-    t.includes("koran") ||
-    s.includes("surah") ||
-    s.includes("sura") ||
-    /(^|\n)\s*\d+\s*[:.]\s*\d+/.test(sampleText) ||   // 2:255 style
-    a.includes("translation") && s.includes("allah");
-
-  return looksQuran ? "quran" : "default";
+export function detectProfileFromMetadata(metaTitle: string, _metaAuthor: string, _sampleText: string): BookProfile {
+  const t = (metaTitle || "").trim().replace(/\s+/g, " ").toLowerCase();
+  return t === "the quran" ? "quran" : "default";
 }
 
 export function buildCitation(profile: BookProfile, opts: {

@@ -27,36 +27,52 @@ function snippetFromText(text: string, q: string) {
 
 export async function ensureIndex(bookId: string, book: any) {
   const cached = await loadSearchCache(bookId);
-  if (cached?.exported && cached?.hrefText) {
-    const idx = makeIndex();
-    await new Promise<void>((resolve) => idx.import(cached.exported, resolve));
-    return { idx, hrefText: cached.hrefText as Record<string, string>, fromCache: true };
-  }
+
+  // Cache only extracted plain text per href.
+  // FlexSearch export/import is multi-part and unreliable across versions,
+  // but rebuilding from cached text is fast and stable.
+  const hrefText: Record<string, string> =
+    (cached?.hrefText as Record<string, string>) ?? {};
 
   const idx = makeIndex();
-  const hrefText: Record<string, string> = {};
 
-  for (let i = 0; i < book.spine.items.length; i++) {
-    const item = book.spine.items[i];
-    const href = item.href;
+  // If cached text exists, rebuild index immediately
+  const cachedHrefs = Object.keys(hrefText);
+  if (cachedHrefs.length > 0) {
+    for (const href of cachedHrefs) {
+      idx.add(href, hrefText[href]);
+    }
+    return { idx, hrefText, fromCache: true };
+  }
+
+  const parser = new DOMParser();
+  const items = book?.spine?.items ?? [];
+
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    const href = item?.href;
+    if (!href) continue;
+
     try {
       const raw = await book.load(href);
-      const doc = new DOMParser().parseFromString(String(raw), "text/html");
-      const text = normalize(doc.body?.textContent ?? "");
+      const doc = parser.parseFromString(raw, "text/html");
+      const text = normalize(doc.body?.textContent || "");
+
       if (text) {
         hrefText[href] = text;
         idx.add(href, text);
       }
-    } catch {}
+    } catch {
+      // ignore
+    }
 
-    if (i % 3 === 0) await new Promise((r) => setTimeout(r, 0));
+    if (i % 3 === 0) await new Promise(r => setTimeout(r, 0));
   }
 
-  const exported = await new Promise<any>((resolve) => idx.export(resolve));
-  await saveSearchCache(bookId, { exported, hrefText, updatedAt: Date.now() });
-
+  await saveSearchCache(bookId, { hrefText, updatedAt: Date.now() });
   return { idx, hrefText, fromCache: false };
 }
+
 
 export function search(idx: any, hrefText: Record<string, string>, q: string) {
   const query = q.trim();
