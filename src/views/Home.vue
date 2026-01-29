@@ -2,6 +2,7 @@
     import { onMounted, ref, computed } from "vue";
     import { useRouter } from "vue-router";
     import Modal from "../components/Modal.vue";
+    import DailyQuoteCard from "../components/DailyQuoteCard.vue";
     import { APP_VERSION, BUILD_DATE_ISO } from "../generated/buildInfo";
     import Onboarding from "../components/Onboarding.vue";
     import { isOnboarded, setOnboarded, loadBooks, saveBooks, saveBookFile, deleteBook } from "../lib/storage";
@@ -123,6 +124,8 @@ function closeTour() {
           </div>
         </div>
     
+        <DailyQuoteCard />
+        
         <div class="p-4 max-w-4xl mx-auto">
           <div v-if="books.length===0" class="opacity-70">
             Import an EPUB to start.
@@ -142,6 +145,8 @@ function closeTour() {
           </div>
         </div>
     
+
+
 
         <Onboarding v-if="showTour" @done="finishTour" />
 

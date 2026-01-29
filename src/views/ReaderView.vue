@@ -25,6 +25,16 @@
 const searchInputEl = ref<HTMLInputElement | null>(null);
 
   const bottomChromeEl = ref<HTMLElement | null>(null);
+    const topChromeEl = ref<HTMLElement | null>(null);
+
+const topPadPx = ref(0);
+const bottomPadPx = ref(0);
+
+const viewerPadStyle = computed(() => ({
+  paddingTop: chrome.value ? `${topPadPx.value}px` : "0px",
+  paddingBottom: chrome.value ? `${bottomPadPx.value}px` : "0px",
+}));
+
 const iframeBottomPadPx = ref(24);
 
 
@@ -48,15 +58,27 @@ function closeSearchModal() {
 
     const indexing = ref(false);
     const q = ref("");
-    const results = ref<{ href: string; snippet: string }[]>([]);
+    const results = ref<{ href: string; snippet: string; count: number }[]>([]);
+    const resultsDockOpen = ref(true);
+const resultsTotalMatches = computed(() =>
+  results.value.reduce((a, r) => a + (r.count || 0), 0)
+);
 
+
+    // const results = ref<{ href: string; snippet: string }[]>([]);
+    let idx: any = null;
+    let hrefText: Record<string, string> = {};
     const idxReady = ref(false);
 const indexDone = ref(0);
 const indexTotal = ref(0);
 const indexFromCache = ref(false);
 
+const hasIframeSelection = ref(false);
 
-    const pendingSearch = ref<{ href: string; query: string } | null>(null);
+
+    // const pendingSearch = ref<{ href: string; query: string } | null>(null);
+    const pendingSearch = ref<{ href: string; query: string; occurrence: number } | null>(null);
+const activeSearch = ref<{ href: string; query: string; occurrence: number; total: number } | null>(null);
 
 
     
@@ -101,12 +123,9 @@ function onKeydown(e: KeyboardEvent) {
   }
 }
 
-
-
-
-function findRangeForQuery(doc: Document, query: string): Range | null {
+function findRangeForQuery(doc: Document, query: string, occurrence: number) {
   const q = query.trim();
-  if (!q) return null;
+  if (!q) return { range: null as Range | null, total: 0 };
 
   const nodes: Text[] = [];
   const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
@@ -116,10 +135,32 @@ function findRangeForQuery(doc: Document, query: string): Range | null {
   }
 
   const full = nodes.map(n => n.data).join("");
-  const idx = full.toLowerCase().indexOf(q.toLowerCase());
-  if (idx < 0) return null;
+  const fullLower = full.toLowerCase();
+  const qLower = q.toLowerCase();
 
-  const endIdx = idx + q.length;
+  const starts: number[] = [];
+  let from = 0;
+  while (true) {
+    const i = fullLower.indexOf(qLower, from);
+    if (i < 0) break;
+    starts.push(i);
+    from = i + Math.max(1, qLower.length);
+  }
+
+  const total = starts.length;
+  if (!total) return { range: null as Range | null, total };
+
+  const k = Math.max(0, Math.min(total - 1, occurrence));
+const idx0 = starts[k];
+if (idx0 == null) return { range: null as Range | null, total };
+const idx = idx0;
+const endIdx = idx + q.length;
+
+
+  // const k = Math.max(0, Math.min(total - 1, occurrence));
+  // const idx = starts[k];
+  // const endIdx = idx + q.length;
+
   let startNode: Text | null = null, endNode: Text | null = null;
   let startOffset = 0, endOffset = 0;
 
@@ -139,34 +180,104 @@ function findRangeForQuery(doc: Document, query: string): Range | null {
     cum += len;
   }
 
-  if (!startNode) return null;
+  if (!startNode) return { range: null as Range | null, total };
   if (!endNode) { endNode = startNode; endOffset = Math.min(startNode.data.length, startOffset + q.length); }
 
   const r = doc.createRange();
   r.setStart(startNode, Math.max(0, startOffset));
   r.setEnd(endNode, Math.max(0, endOffset));
-  return r;
+  return { range: r, total };
 }
 
-async function scrollToQueryInRendered(contents: any, query: string) {
-  const doc = contents?.document as Document | undefined;
-  if (!doc?.body) return;
 
-  const range = findRangeForQuery(doc, query);
-  if (!range) return;
+
+// function findRangeForQuery(doc: Document, query: string): Range | null {
+//   const q = query.trim();
+//   if (!q) return null;
+
+//   const nodes: Text[] = [];
+//   const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT);
+//   while (walker.nextNode()) {
+//     const t = walker.currentNode as Text;
+//     if (t.data && t.data.trim()) nodes.push(t);
+//   }
+
+//   const full = nodes.map(n => n.data).join("");
+//   const idx = full.toLowerCase().indexOf(q.toLowerCase());
+//   if (idx < 0) return null;
+
+//   const endIdx = idx + q.length;
+//   let startNode: Text | null = null, endNode: Text | null = null;
+//   let startOffset = 0, endOffset = 0;
+
+//   let cum = 0;
+//   for (const n of nodes) {
+//     const len = n.data.length;
+
+//     if (!startNode && idx < cum + len) {
+//       startNode = n;
+//       startOffset = idx - cum;
+//     }
+//     if (!endNode && endIdx <= cum + len) {
+//       endNode = n;
+//       endOffset = endIdx - cum;
+//       break;
+//     }
+//     cum += len;
+//   }
+
+//   if (!startNode) return null;
+//   if (!endNode) { endNode = startNode; endOffset = Math.min(startNode.data.length, startOffset + q.length); }
+
+//   const r = doc.createRange();
+//   r.setStart(startNode, Math.max(0, startOffset));
+//   r.setEnd(endNode, Math.max(0, endOffset));
+//   return r;
+// }
+
+async function scrollToQueryInRendered(contents: any, query: string, occurrence: number) {
+  const doc = contents?.document as Document | undefined;
+  if (!doc?.body) return { total: 0 };
+
+  const { range, total } = findRangeForQuery(doc, query, occurrence);
+  if (!range) return { total };
 
   const rect = range.getBoundingClientRect();
   const win = contents.window as Window;
 
-  // center the match in the iframe viewport
   const targetY = win.scrollY + rect.top - win.innerHeight * 0.33;
   win.scrollTo({ top: Math.max(0, targetY), behavior: "instant" as any });
 
-  // (optional) also ensure something is focused for accessibility
-  try {
-    (range.startContainer as any)?.parentElement?.scrollIntoView?.({ block: "center" });
-  } catch {}
+  // Optional: show selection highlight
+  // try {
+  //   const sel = win.getSelection?.();
+  //   sel?.removeAllRanges?.();
+  //   sel?.addRange?.(range);
+  // } catch {}
+
+  return { total };
 }
+
+
+// async function scrollToQueryInRendered(contents: any, query: string) {
+//   const doc = contents?.document as Document | undefined;
+//   if (!doc?.body) return;
+
+//   const range = findRangeForQuery(doc, query);
+//   if (!range) return;
+
+//   const rect = range.getBoundingClientRect();
+//   const win = contents.window as Window;
+
+//   // center the match in the iframe viewport
+//   const targetY = win.scrollY + rect.top - win.innerHeight * 0.33;
+//   win.scrollTo({ top: Math.max(0, targetY), behavior: "instant" as any });
+
+//   // (optional) also ensure something is focused for accessibility
+//   try {
+//     (range.startContainer as any)?.parentElement?.scrollIntoView?.({ block: "center" });
+//   } catch {}
+// }
 
   // Compute CFI then display to scroll exactly
   // try {
@@ -181,24 +292,68 @@ async function scrollToQueryInRendered(contents: any, query: string) {
 //   } catch {}
 // }
 
+// async function jumpToSearch(r: { href: string }) {
+//   const query = q.value.trim();
+//   closeModal();
+//   chrome.value = true;
+
+//   if (!query) {
+//     await rendition.display(r.href);
+//     return;
+//   }
+
+//   pendingSearch.value = { href: r.href, query };
+//   await rendition.display(r.href);
+// }
+
 async function jumpToSearch(r: { href: string }) {
   const query = q.value.trim();
   closeModal();
   chrome.value = true;
+  resultsDockOpen.value = false;
+
 
   if (!query) {
+    activeSearch.value = null;
     await rendition.display(r.href);
     return;
   }
 
-  pendingSearch.value = { href: r.href, query };
+  activeSearch.value = { href: r.href, query, occurrence: 0, total: 0 };
+  pendingSearch.value = { href: r.href, query, occurrence: 0 };
   await rendition.display(r.href);
 }
 
+async function gotoMatch(delta: number) {
+  const a = activeSearch.value;
+  if (!a || !a.query) return;
+  if (!a.total) {
+    // if totals not computed yet, force a re-display to compute
+    pendingSearch.value = { href: a.href, query: a.query, occurrence: a.occurrence };
+    await rendition.display(a.href);
+    return;
+  }
+
+  const next = (a.occurrence + delta + a.total) % a.total;
+  a.occurrence = next;
+
+  const loc = (rendition?.location?.start?.href || "").split("#")[0];
+  const target = (a.href || "").split("#")[0];
+
+  if (loc && target && loc === target) {
+    const contentsArr = (rendition?.getContents?.() ?? []) as any[];
+    const contents = contentsArr[0];
+    if (contents) {
+      await scrollToQueryInRendered(contents, a.query, a.occurrence);
+    }
+    return;
+  }
+
+  pendingSearch.value = { href: a.href, query: a.query, occurrence: a.occurrence };
+  await rendition.display(a.href);
+}
 
 
-    let idx: any = null;
-    let hrefText: Record<string, string> = {};
     
 
 
@@ -214,8 +369,8 @@ const modalBaseHref = ref<string | null>(null);
     // let glossary: Record<string, any> = {};
     let sessionId: string | null = null;
     
-    const topPad = computed(() => chrome.value ? "pt-24" : "pt-0");
-const botPad = computed(() => chrome.value ? "pb-32" : "pb-0");
+//     const topPad = computed(() => chrome.value ? "pt-24" : "pt-0");
+// const botPad = computed(() => chrome.value ? "pb-32" : "pb-0");
 
     // const topPad = computed(() => (chrome.value && !prefs.value.studyMode) ? "pt-24" : "pt-0");
     // const botPad = computed(() => (chrome.value && !prefs.value.studyMode) ? "pb-32" : "pb-0");
@@ -501,16 +656,38 @@ function looksLikeNoterefHref(href: string) {
   return !!href && href.includes("#") && /#(fn[-_]?|footnote|note|endnote)/i.test(href);
 }
 
-async function updateIframePad() {
+// async function updateIframePad() {
+//   await nextTick();
+//   const h = chrome.value && bottomChromeEl.value ? bottomChromeEl.value.offsetHeight : 0;
+//   iframeBottomPadPx.value = Math.max(24, h + 24);
+//   applyTheme();
+// }
+
+// watch(chrome, () => updateIframePad());
+// onMounted(() => window.addEventListener("resize", updateIframePad));
+// onBeforeUnmount(() => window.removeEventListener("resize", updateIframePad));
+
+async function updateViewerPads() {
   await nextTick();
-  const h = chrome.value && bottomChromeEl.value ? bottomChromeEl.value.offsetHeight : 0;
-  iframeBottomPadPx.value = Math.max(24, h + 24);
+
+  const topH = chrome.value && topChromeEl.value ? topChromeEl.value.offsetHeight : 0;
+  const botH = chrome.value && bottomChromeEl.value ? bottomChromeEl.value.offsetHeight : 0;
+
+  topPadPx.value = topH;
+  bottomPadPx.value = botH;
+
+  // keeps text above bottom controls inside iframe
+  iframeBottomPadPx.value = Math.max(24, botH + 24);
   applyTheme();
 }
 
-watch(chrome, () => updateIframePad());
-onMounted(() => window.addEventListener("resize", updateIframePad));
-onBeforeUnmount(() => window.removeEventListener("resize", updateIframePad));
+watch(chrome, updateViewerPads);
+
+onMounted(() => {
+  updateViewerPads();
+  window.addEventListener("resize", updateViewerPads);
+});
+onBeforeUnmount(() => window.removeEventListener("resize", updateViewerPads));
 
 
 
@@ -596,13 +773,20 @@ console.info("[search] text", { totalChars: total, firstHref: first?.[0], firstS
 //       }
 //     }
     
+let searchTimer: number | null = null;
+
 watch(q, () => {
+  if (searchTimer) window.clearTimeout(searchTimer);
+
   const qq = q.value.trim();
   if (!qq || !idxReady.value || !idx) {
     results.value = [];
     return;
   }
-  results.value = doSearch(idx, hrefText, qq);
+
+  searchTimer = window.setTimeout(() => {
+    results.value = doSearch(idx, hrefText, qq);
+  }, 200);
 });
 
 watch(chrome, () => applyTheme());
@@ -1014,12 +1198,25 @@ const place = suraLabel ?? sectionLabel;
   if (!sh || sh !== th) return;
 
   pendingSearch.value = null;
-  await scrollToQueryInRendered(contents, p.query);
+  const res = await scrollToQueryInRendered(contents, p.query, p.occurrence);
+  if (activeSearch.value && activeSearch.value.href.split("#")[0] === th) {
+    activeSearch.value.total = res.total;
+    activeSearch.value.occurrence = Math.min(activeSearch.value.occurrence, Math.max(0, res.total - 1));
+  }
+
+  // await scrollToQueryInRendered(contents, p.query);
 });
 
     
       rendition.hooks.content.register((contents: any) => {
         const doc = contents.document as Document;
+        const updateSel = () => {
+  const sel = doc.getSelection?.();
+  hasIframeSelection.value = !!sel && !sel.isCollapsed && !!sel.toString().trim();
+};
+doc.addEventListener("selectionchange", updateSel);
+doc.addEventListener("pointerup", updateSel as any, { passive: true } as any);
+
         doc.querySelectorAll("script").forEach(s => s.remove());
 
     
@@ -1135,7 +1332,7 @@ onBeforeUnmount(async () => {
     <template>
       <div class="h-full bg-base-100">
         <!-- Top chrome -->
-        <div v-if="chrome" class="fixed top-0 left-0 right-0 z-30 bg-base-200/95 backdrop-blur border-b border-base-300">
+        <div v-if="chrome" ref="topChromeEl" class="fixed top-0 left-0 right-0 z-30 bg-base-200/95 backdrop-blur border-b border-base-300">
           <div class="navbar">
             <div class="flex-1 min-w-0">
               <button class="btn btn-ghost btn-sm" @click="back">← Library</button>
@@ -1149,27 +1346,67 @@ onBeforeUnmount(async () => {
     
           <div class="px-3 pb-3">
             <input class="input input-bordered w-full" placeholder="Search in book…" v-model="q" />
+            <div v-if="activeSearch && activeSearch.query === q.trim() && activeSearch.total > 0"
+     class="mt-2 flex items-center gap-2 text-xs opacity-70">
+  <span>Match {{ activeSearch.occurrence + 1 }} / {{ activeSearch.total }}</span>
+  <button class="btn btn-xs btn-outline" :disabled="hasIframeSelection" @click.stop="gotoMatch(-1)">Prev</button>
+<button class="btn btn-xs btn-outline" :disabled="hasIframeSelection" @click.stop="gotoMatch(1)">Next</button>
+
+  <!-- <button class="btn btn-xs btn-outline" @click.stop="gotoMatch(-1)">Prev</button>
+  <button class="btn btn-xs btn-outline" @click.stop="gotoMatch(1)">Next</button> -->
+</div>
+
             <div v-if="indexing" class="text-xs opacity-60 mt-1">  Indexing {{ indexDone }}/{{ indexTotal }}…
             </div>
             <div v-else-if="idxReady" class="text-xs opacity-60 mt-1">
   Search ready ({{ Object.keys(hrefText).length }} chapters{{ indexFromCache ? ", cached" : "" }})
 </div>
-            <div v-if="results.length" class="mt-2 max-h-56 overflow-auto bg-base-100 rounded-xl border border-base-300">
+            <!-- <div v-if="results.length" class="mt-2 max-h-56 overflow-auto bg-base-100 rounded-xl border border-base-300">
               <div class="max-h-64 overflow-auto border border-base-300 rounded-md">
 
               <div v-for="r in results" :key="r.href" class="p-2 hover:bg-base-200 cursor-pointer" @click="jumpToSearch(r)"              >
-                <div class="text-xs opacity-60">{{ r.href }}</div>
+                <div class="text-xs opacity-60">{{ r.href }} · {{ r.count }} match{{ r.count === 1 ? "" : "es" }}</div>
+
 
                 <div class="text-sm">{{ r.snippet }}</div>
               </div>
 
-              </div>
-            </div>
+              </div> -->
+            <!-- </div> -->
+            <div v-if="results.length" class="mt-2">
+  <div class="flex items-center justify-between text-xs opacity-70">
+    <div>
+      {{ resultsTotalMatches }} match{{ resultsTotalMatches === 1 ? "" : "es" }}
+      in {{ results.length }} chapter{{ results.length === 1 ? "" : "s" }}
+    </div>
+    <button class="btn btn-xs btn-ghost" @click="resultsDockOpen = !resultsDockOpen">
+      {{ resultsDockOpen ? "Hide" : "Show" }}
+    </button>
+  </div>
+
+  <div
+    v-if="resultsDockOpen"
+    class="mt-1 max-h-[30vh] overflow-auto bg-base-100 rounded-xl border border-base-300"
+  >
+    <div
+      v-for="r in results"
+      :key="r.href"
+      class="p-2 hover:bg-base-200 cursor-pointer"
+      @click="jumpToSearch(r)"
+    >
+      <div class="text-xs opacity-60">
+        {{ r.href }} · {{ r.count }} match{{ r.count === 1 ? "" : "es" }}
+      </div>
+      <div class="text-sm">{{ r.snippet }}</div>
+    </div>
+  </div>
+</div>
           </div>
         </div>
     
         <!-- Reader surface -->
-        <div :class="[topPad, botPad]" class="h-full" @click="toggleChrome">
+          <div class="h-full" :style="viewerPadStyle" @click="toggleChrome">
+
           <div ref="viewer" class="h-full w-full"></div>
         </div>
     
@@ -1231,15 +1468,22 @@ onBeforeUnmount(async () => {
   </label>
 </label>
 
+<div class="form-control col-span-2">
+  <div class="label"><span class="label-text">Study mode</span></div>
+  <label class="flex items-center gap-2 cursor-pointer">
+    <input type="checkbox" class="toggle" v-model="prefs.studyMode" />
+    <span class="text-sm opacity-70">Hide UI (tap screen to show/hide)</span>
+  </label>
+</div>
 
 
 
 
-              <div class="label"><span class="label-text">Study mode</span></div>
+              <!-- <div class="label"><span class="label-text">Study mode</span></div>
               <label class="flex items-center gap-2 cursor-pointer">
                 <input type="checkbox" class="toggle" v-model="prefs.studyMode" />
                 <span class="text-sm opacity-70">Hide UI (tap screen to show/hide)</span>
-              </label>
+              </label> -->
             </label>
           </div>
         </div>
@@ -1317,7 +1561,8 @@ onBeforeUnmount(async () => {
       class="p-2 hover:bg-base-200 cursor-pointer"
       @click="jumpToSearch(r); closeSearchModal()"
     >
-      <div class="text-xs opacity-60">{{ r.href }}</div>
+    <div class="text-xs opacity-60">{{ r.href }} · {{ r.count }} match{{ r.count === 1 ? "" : "es" }}</div>
+
       <div class="text-sm">{{ r.snippet }}</div>
     </div>
   </div>

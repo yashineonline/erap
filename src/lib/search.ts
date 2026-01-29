@@ -3,13 +3,16 @@ import FlexSearch from "flexsearch";
 // import type ePub from "epubjs";
 import { loadSearchCache, saveSearchCache  } from "./storage";
 
-type IndexHit = { href: string; score?: number };
+// type IndexHit = { href: string; score?: number };
 
 export type SearchIndexResult = {
   idx: any;
   hrefText: Record<string, string>;
   fromCache: boolean;
 };
+
+export type SearchHit = { href: string; snippet: string; count: number };
+
 
 const SEARCH_CACHE_VERSION = 3;
 
@@ -179,16 +182,57 @@ export async function ensureIndex(
 // }
 
 
-export function search(idx: any, hrefText: Record<string, string>, q: string) {
-  const query = q.trim();
+// export function search(idx: any, hrefText: Record<string, string>, q: string) {
+//   const query = q.trim();
+//   if (!query) return [];
+//   const hits = idx.search(query.toLowerCase(), 30) as (string | IndexHit)[];
+
+//   // const hits = idx.search(query, 30) as (string | IndexHit)[];
+//   const hrefs = hits.map((h) => (typeof h === "string" ? h : h.href)).filter(Boolean) as string[];
+
+//   return hrefs.map((href) => ({
+//     href,
+//     snippet: snippetFromText(hrefText[href] || "", query),
+//   }));
+// }
+
+function countAndFirstPos(hay: string, needle: string) {
+  let count = 0;
+  let first = -1;
+  let from = 0;
+  while (true) {
+    const i = hay.indexOf(needle, from);
+    if (i < 0) break;
+    if (first < 0) first = i;
+    count++;
+    from = i + Math.max(1, needle.length);
+  }
+  return { count, first };
+}
+
+export function search(_idx: any, hrefText: Record<string, string>, q: string): SearchHit[] {
+  const query = normalize(q);
   if (!query) return [];
-  const hits = idx.search(query.toLowerCase(), 30) as (string | IndexHit)[];
 
-  // const hits = idx.search(query, 30) as (string | IndexHit)[];
-  const hrefs = hits.map((h) => (typeof h === "string" ? h : h.href)).filter(Boolean) as string[];
+  const needle = query.toLowerCase();
+  const out: SearchHit[] = [];
 
-  return hrefs.map((href) => ({
-    href,
-    snippet: snippetFromText(hrefText[href] || "", query),
-  }));
+  for (const href of Object.keys(hrefText)) {
+    const t = normalize(hrefText[href] || "");
+    if (!t) continue;
+
+    const hay = t.toLowerCase();
+    const { count, first } = countAndFirstPos(hay, needle);
+    if (count <= 0 || first < 0) continue;
+
+    out.push({
+      href,
+      count,
+      snippet: snippetFromText(t, query), // uses first occurrence already
+    });
+  }
+
+  // Sort by most matches first (helps when there are many)
+  out.sort((a, b) => b.count - a.count);
+  return out;
 }
