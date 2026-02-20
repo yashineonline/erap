@@ -4,7 +4,6 @@ import type { BookMeta, ReaderPrefs, ReadingSession } from "./types";
 
 const K = {
   meta: "meta:v1",
-  ui: "ui:v2",
   books: "books:v1",                  // BookMeta[]
   bookFile: (id: string) => `bf:${id}`, // Blob
   prefs: (id: string) => `prefs:${id}`,  // ReaderPrefs
@@ -23,28 +22,7 @@ export const DEFAULT_PREFS: ReaderPrefs = {
   textAlign: "justify",
   noterefColor: "#2563eb",
   noterefUnderline: true,
-
-  // v2
-  realBookFeel: false,
-  readAloud: false,
-  ttsRate: 1.0,
-  ttsVoiceURI: "",
 };
-
-// v2: lightweight UI prefs (not per-book)
-export type UiPrefs = {
-  bookshelfBgDataUrl?: string; // user-chosen image (data URL)
-  bookshelfUseCustom?: boolean;
-};
-
-export async function loadUiPrefs(): Promise<UiPrefs> {
-  return (await get(K.ui)) ?? {};
-}
-
-export async function saveUiPrefs(p: UiPrefs) {
-  const cur = ((await get(K.ui)) ?? {}) as UiPrefs;
-  await set(K.ui, { ...cur, ...p });
-}
 
 export async function isOnboarded(): Promise<boolean> {
   const meta = (await get(K.meta)) ?? {};

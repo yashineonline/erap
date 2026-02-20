@@ -2,7 +2,7 @@
   "name": "glossary-reader",
   "private": true,
   "type": "module",
-  "appVersion": "0.06",
+  "appVersion": "0.08",
   "scripts": {
     "dev": "vite",
     "prebuild": "node scripts/bump-build.mjs",

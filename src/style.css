@@ -14,5 +14,106 @@ html, body, #app {
   --reader-font: ui-serif, Georgia, "Times New Roman", Times, serif;
 }
 
+.spineTitle{
+  /* IMPORTANT: remove any writing-mode you had */
+  writing-mode: horizontal-tb;
+  text-orientation: mixed;
 
+  position: absolute;
+  left: 50%;
+  top: 50%;
 
+  /* rotate text like a real spine */
+  transform: translate(-50%, -50%); 
+  /* rotate(-90deg); */
+  transform-origin: center;
+
+  /* white-space: nowrap; */
+  width: max-content;
+
+  /* optional: keep it from spilling */
+  max-width: calc(100% - 1rem);
+  /* overflow: hidden; */
+  text-overflow: ellipsis;
+}
+
+.shelfStage{
+  position: relative;
+  width: min(1100px, 96vw);
+  aspect-ratio: 1 / 2;            /* adjust to your image ratio */
+  margin: 1rem auto 2rem auto;
+  background: var(--shelf-bg) center / contain no-repeat;
+}
+
+/* Overlay sits on top of the bookshelf image */
+.shelfOverlay{
+  position: absolute;
+  inset: 0;
+  padding: 9% 10% 10% 10%; /* align inside wood frame */
+  transform: translate(var(--offx, 0px), var(--offy, 0px));
+
+  display: grid;
+  grid-template-rows: 1fr 1fr 1fr 1fr 1fr; /* 5 shelf spaces */
+  gap: 2.2%;
+}
+
+/* Each shelf row: books sit on the “board” (bottom-aligned) */
+.shelfRow{
+  display: flex;
+  align-items: flex-end;
+  gap: 0.75rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 0.35rem;
+}
+
+/* book spine */
+.spine{
+  position: relative;
+  height: 60%;
+  width: 64px;
+  border-radius: 14px;
+  box-shadow: 0 10px 22px rgba(0,0,0,0.25);
+  overflow: hidden;
+  flex: 0 0 auto;
+}
+
+/* accent strip */
+.spineAccent{
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 10px;
+  opacity: 0.95;
+}
+
+/* THIS fixes your “vertical text”: use rotate, not writing-mode */
+.spineTitle{
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%) rotate(-90deg);
+  transform-origin: center; 
+  white-space: nowrap;
+  width: max-content;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 700;
+  font-size: 0.85rem;
+  color: rgba(255,255,255,0.92);
+  letter-spacing: 0.02em;
+}
+
+/* remove button */
+.spineTrash{
+  position: absolute;
+  right: 6px;
+  top: 6px;
+  width: 28px;
+  height: 28px;
+  border-radius: 10px;
+  background: rgba(0,0,0,0.25);
+  color: rgba(255,255,255,0.9);
+}

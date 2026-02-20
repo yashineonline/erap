@@ -25,14 +25,6 @@ export type ReaderPrefs = {
   textAlign: TextAlign;
   noterefColor: string;
   noterefUnderline: boolean;
-
-  // v2: optional “real book feel” (paginated + swipe)
-  realBookFeel: boolean;
-
-  // v2: read-aloud using the Web Speech API (no GPT)
-  readAloud: boolean;
-  ttsRate: number; // 0.6..1.4
-  ttsVoiceURI?: string;
 };
 
 export type ReadingSession = {

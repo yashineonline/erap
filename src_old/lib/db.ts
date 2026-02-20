@@ -1,5 +1,5 @@
 import { openDB } from "idb";
-import type { ReaderPrefs } from "./types";
+import type { TextAlign } from "./types";
 
 export type StoredBook = {
   id: string;
@@ -12,8 +12,18 @@ export type StoredBook = {
   profile?: "default" | "quran";
 };
 
-// NOTE: this file is kept for legacy reasons; the app uses lib/storage.ts.
-// We still reference the shared ReaderPrefs type from lib/types.ts so type-checking stays consistent.
+export type ReaderPrefs = {
+  bg: string;
+  fg: string;
+  font: string;
+  fontSizePct: number;
+  fontSize: number;     // percent
+  lineHeight: number;   // em
+  textAlign: TextAlign;
+  marginEm: number;
+  studyMode: boolean;
+  noterefColor: string
+};
 
 export type ReadingSession = {
   id: string;
@@ -76,17 +86,9 @@ export async function getPrefs(bookId: string): Promise<ReaderPrefs> {
       bg: "#ffffff",
       fg: "#111827",
       font: "ui-serif, Georgia, \"Times New Roman\", Times, serif",
-      fontSizePct: 110,
+      fontSize: 110,
       lineHeight: 1.55,
-      marginEm: 1.2,
       studyMode: false,
-      textAlign: "justify",
-      noterefColor: "#2563eb",
-      noterefUnderline: true,
-      realBookFeel: false,
-      readAloud: false,
-      ttsRate: 1.0,
-      ttsVoiceURI: "",
     }
   );
 }

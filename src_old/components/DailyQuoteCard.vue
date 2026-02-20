@@ -351,7 +351,7 @@ console.log("[DailyQuote] PL stats:", { totalPL, skippedNav, skippedLink, skippe
   function formatQuranCitation(author: string, title: string): string {
     const a = safeText(author);
     const t = safeText(title);
-    return a ? `${a}. ${t}.` : `${t}.`;
+    return a ? `Translated by ${a}. ${t}.` : `${t}.`;
   }
   
   function formatNonQuranCitation(author: string, title: string): string {

@@ -1,6 +1,6 @@
 import { createRouter, createWebHashHistory } from "vue-router";
-const Home = () => import("./views/Home_v2.vue");
-const ReaderView = () => import("./views/ReaderView_v2.vue");
+const Home = () => import("./views/Home.vue");
+const ReaderView = () => import("./views/ReaderView.vue");
 
 
 
